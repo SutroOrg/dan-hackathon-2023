@@ -1,0 +1,26 @@
+{
+  "name": "ast-vector-poc",
+  "packageManager": "yarn@1.22.19",
+  "type": "module",
+  "scripts": {
+    "index:build": "node --loader ts-node/esm build.ts",
+    "index:purge": "node --loader ts-node/esm purge-index.mts",
+    "graph:build": "node --loader ts-node/esm make-graph.ts",
+    "graph:analyze": "node --loader ts-node/esm analyze-graph.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.1.1",
+    "eslint": "^8.40.0",
+    "prettier": "^2.8.8",
+    "ts-node": "^10.9.1"
+  },
+  "dependencies": {
+    "@pinecone-database/pinecone": "^0.1.5",
+    "dotenv": "^16.0.3",
+    "durand-kerner": "^1.0.0",
+    "langchain": "^0.0.73",
+    "mathjs": "^11.8.0",
+    "p-queue": "^7.3.4",
+    "typescript": "^5.0.4"
+  }
+}
