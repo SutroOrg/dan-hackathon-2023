@@ -4,6 +4,7 @@
 
 import PQueue from "p-queue";
 import { MetricSpace } from "./metric-space.js";
+import { cpus } from "os";
 import pg from "pg";
 
 export class HiAggAlgo {
@@ -182,7 +183,7 @@ export class HiAggAlgo {
       );
     };
 
-    const queue = new PQueue({ concurrency: 15 });
+    const queue = new PQueue({ concurrency: cpus().length });
     for (let clusterId = 0; clusterId < this.clusters.length; clusterId++) {
       queue.add(() => calculate(clusterId));
     }
