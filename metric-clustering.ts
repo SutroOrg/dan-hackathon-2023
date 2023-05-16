@@ -117,6 +117,7 @@ export class HiAggAlgo {
     const { rows } = await this.pgClient.query(
       "SELECT * FROM cluster_cohesion WHERE cohesion > 0 AND cluster1 != cluster2 LIMIT 1;"
     );
+
     if (rows.length === 0) {
       return null;
     }
@@ -194,7 +195,7 @@ export class HiAggAlgo {
       chunkSize: number
     ) => {
       const clusterCount = this.clusters.length;
-      const totalChunks = (clusterCount * clusterCount) / chunkSize;
+      const totalChunks = Math.ceil((clusterCount * clusterCount) / chunkSize);
       const chunkNumber =
         Math.floor((offsets.x * clusterCount + offsets.y) / chunkSize) + 1;
       console.log(`Calculating chunk #${chunkNumber} of ${totalChunks}`);
@@ -233,7 +234,7 @@ export class HiAggAlgo {
       }
     }
 
-    await queue.onEmpty();
+    await queue.onIdle();
     console.log("Done");
 
     let cohesivePair: number[] | null = await this.findCohesivePair();
