@@ -1,127 +1,29 @@
-import { PineconeClient } from "@pinecone-database/pinecone";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import PQueue from "p-queue";
+import pg from "pg";
 
-type Cache = Map<string, Map<string, number>>;
+const pgClient = new pg.Client({ ssl: { rejectUnauthorized: false } });
+await pgClient.connect();
 
-export function loadDistances(filename: string): Cache {
+const GET_QUERY = "SELECT * FROM dist($1,$2);";
+const getDistance = async (a: string, b: string): Promise<number> => {
+  console.log(`getDistance(${a}, ${b})`);
+  if (a === b) {
+    return 0;
+  }
   try {
-    if (existsSync(filename)) {
-      const contents = readFileSync(filename, "utf-8");
-      const mapAsArray = JSON.parse(contents);
-      return new Map(mapAsArray.map(([key, value]) => [key, new Map(value)]));
-    }
+    const { rows } = await pgClient.query(GET_QUERY, [a, b]);
+    return rows[0].dist;
   } catch (e) {
-    return new Map();
+    console.error("Error querying Postgres");
+    process.exit(1);
   }
-
-  return new Map();
-}
-
-export function saveDistances(filename: string, distances: Cache) {
-  const mapAsArray = [];
-  const topEntries = distances.entries();
-  for (const entry of topEntries) {
-    const [key, value] = entry;
-    mapAsArray.push([key, [...value.entries()]]);
-  }
-
-  writeFileSync(filename, JSON.stringify(mapAsArray));
-}
-
-const client = new PineconeClient();
-await client.init({
-  apiKey: process.env.PINECONE_API_KEY,
-  environment: process.env.PINECONE_ENVIRONMENT,
-});
-const pineconeIndex = client.Index(process.env.PINECONE_INDEX_NAME);
-
-const readCacheGenerator = (cache: Cache) => (a: string, b: string) => {
-  if (cache.has(a)) {
-    const aMap = cache.get(a);
-    if (aMap.has(b)) {
-      return aMap.get(b);
-    }
-  }
-  if (cache.has(b)) {
-    const bMap = cache.get(b);
-    if (bMap.has(a)) {
-      return bMap.get(a);
-    }
-  }
-  return undefined;
 };
 
-const writeCacheGenerator =
-  (cache: Cache) => (a: string, b: string, distance: number) => {
-    if (cache.has(a)) {
-      const aMap = cache.get(a);
-      aMap.set(b, distance);
-    } else {
-      cache.set(a, new Map([[b, distance]]));
-    }
-    if (cache.has(b)) {
-      const bMap = cache.get(b);
-      bMap.set(a, distance);
-    } else {
-      cache.set(b, new Map([[a, distance]]));
-    }
-  };
-
-export type DistanceFunctionOptions = {
-  topK: number;
-  filename: string;
-};
-
-export const generateDistanceFunction = ({
-  topK,
-  filename,
-}: DistanceFunctionOptions) => {
+export const generateDistanceFunction = () => {
   console.log("generateDistanceFunction");
-  const cache = loadDistances(filename);
-  const readCache = readCacheGenerator(cache);
-  const writeCache = writeCacheGenerator(cache);
-  const queue = new PQueue({ concurrency: 1 });
-
-  const saveCache = () => {
-    console.log("Saving cache");
-    saveDistances(filename, cache);
-  };
 
   const distanceFunction = async (a: string, b: string) => {
-    const cached = readCache(a, b);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const { matches } = await queue.add(
-      () =>
-        pineconeIndex
-          .query({
-            queryRequest: {
-              topK,
-              id: a,
-              includeMetadata: true,
-              namespace: "sutro-classic",
-            },
-          })
-          .catch((e) => {
-            console.log("Error querying Pinecone", e);
-            throw e;
-          }),
-      { throwOnTimeout: true }
-    );
-
-    console.log({ matches });
-
-    matches.forEach(({ score, id }) => {
-      const distance = score;
-      writeCache(a, id, distance);
-      saveCache();
-    });
-
-    return readCache(a, b);
+    return getDistance(a, b);
   };
 
-  return { distanceFunction, saveCache };
+  return { distanceFunction };
 };

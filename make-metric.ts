@@ -1,38 +1,20 @@
 import { generateMetricSpace } from "./build-metric-space.mjs";
 import { generateDistanceFunction } from "./cached-pinecone-distance.js";
-import { loadIds } from "./document-ids.mjs";
-import { hiAgg } from "./metric-clustering.js";
 
-const ids = loadIds("ids.json");
+import { HiAggAlgo } from "./metric-clustering.js";
 
-console.log(`Loaded ${ids.size} ids`);
-
-const { distanceFunction, saveCache } = generateDistanceFunction({
-  topK: ids.size,
-  filename: "distances.json",
-});
+const { distanceFunction } = generateDistanceFunction();
 
 const space = await generateMetricSpace(distanceFunction);
 
-const start =
-  "urn:sutro:%2FUsers%2Fdancrumb%2FProjects%2FSutro%2Fpackages%2Fsutro-common%2Fsrc%2Fassert.ts#563-799";
+console.log("Running HiAgg");
 
-const nearest = await space.getNearestNeighbors(start, 10);
+const hiAgg = new HiAggAlgo(space);
 
-console.log({
-  start,
-  nearest: await Promise.all(
-    nearest.map(async (n) => {
-      return {
-        id: n,
-        distance: await distanceFunction(start, n),
-      };
-    })
-  ),
-});
+const clusters = await hiAgg.execute();
 
-saveCache();
+console.log({ clusters });
 
-const clusters = hiAgg(space);
+console.log(`Merged into ${clusters.length} clusters`);
 
-console.log(clusters);
+process.exit(0);

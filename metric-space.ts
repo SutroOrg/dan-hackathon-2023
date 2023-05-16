@@ -19,10 +19,12 @@ export class MetricSpace<P> {
   }
 
   async getNearestNeighbors(point: P, k: number): Promise<P[]> {
+    console.log(`getNearestNeighbors ${point} ${k}`);
     const points = Array.from(this.points);
-    const distances = await Promise.all(
-      points.map((p) => this.distance(point, p))
-    );
+    const distances = [];
+    for (const p of points) {
+      distances.push(await this.distance(point, p));
+    }
     const sortedPoints = points.sort((a, b) => {
       const aIndex = points.indexOf(a);
       const bIndex = points.indexOf(b);

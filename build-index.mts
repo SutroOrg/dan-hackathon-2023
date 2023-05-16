@@ -1,9 +1,9 @@
 import ts from "typescript";
-import { PineconeClient } from "@pinecone-database/pinecone";
 import { Document } from "langchain/document";
 import { OpenAIEmbeddings } from "langchain/embeddings/openai";
-import { PineconeStore } from "langchain/vectorstores/pinecone";
 import { Metadata } from "./vector-store.js";
+
+import pg from "pg";
 
 const generateUri = (filename: string, start: number, end: number) =>
   `urn:sutro:${encodeURIComponent(filename)}#${start}-${end}`;
@@ -49,6 +49,7 @@ function generateFileList(
     .getSourceFiles()
     .filter((sourceFile) => !/\.d\.ts$/.test(sourceFile.fileName))
     .forEach((sourceFile) => {
+      console.log(`Analyzing ${sourceFile.fileName}...`);
       if (!fileSet.has(sourceFile.fileName)) {
         processFile(sourceFile);
         fileSet.add(sourceFile.fileName);
@@ -59,16 +60,12 @@ function generateFileList(
 
 export const buildVectorIndex = async (
   filenames: string[],
-  ids = new Set<string>()
-): Promise<Set<string>> => {
-  const client = new PineconeClient();
-  await client.init({
-    apiKey: process.env.PINECONE_API_KEY,
-    environment: process.env.PINECONE_ENVIRONMENT,
-  });
-  const pineconeIndex = client.Index(process.env.PINECONE_INDEX_NAME);
-  await pineconeIndex.delete1({ deleteAll: true });
-
+  batchSize = 20
+): Promise<void> => {
+  console.log("Connecting to Postgres");
+  const pgClient = new pg.Client({ ssl: { rejectUnauthorized: false } });
+  await pgClient.connect();
+  await pgClient.query("TRUNCATE TABLE embeddings;");
   generateFileList(filenames, {
     noEmitOnError: true,
     noImplicitAny: true,
@@ -77,24 +74,45 @@ export const buildVectorIndex = async (
   });
 
   const docsForEmbedding: Document[] = [];
-  const docIds: string[] = [];
 
   Object.keys(docs).forEach((id) => {
-    ids.add(id);
-    docIds.push(id);
     docsForEmbedding.push(docs[id]);
   });
 
   console.log(`Created ${docsForEmbedding.length} documents for embedding`);
 
-  const store = new PineconeStore(new OpenAIEmbeddings(), {
-    pineconeIndex,
-    namespace: "sutro-classic",
-  });
-
   const start = +Date.now();
   console.log("Adding documents...");
-  await store.addDocuments(docsForEmbedding, docIds);
+  const embeddings = new OpenAIEmbeddings();
+
+  const EMBED_QUERY =
+    "INSERT INTO embeddings (id, content, vector) VALUES ($1, $2, $3);";
+
+  const docEntries = Object.entries(docs);
+
+  for (let i = 0; i < docEntries.length; i += batchSize) {
+    console.log(
+      `Chunk ${i / batchSize} of ${Math.ceil(docEntries.length / batchSize)}`
+    );
+    const chunk = docEntries.slice(i, i + batchSize);
+    const chunkEmbeddings = await embeddings.embedDocuments(
+      chunk.map((c) => c[1].pageContent)
+    );
+    for (let j = 0; j < chunk.length; j++) {
+      const [id, doc] = chunk[j];
+      const embedding = chunkEmbeddings[j];
+      await pgClient.query(EMBED_QUERY, [
+        id,
+        doc.pageContent,
+        JSON.stringify(embedding),
+      ]);
+    }
+  }
+
   console.log(`Completed (took ${+Date.now() - start}ms)`);
-  return ids;
+  pgClient.end();
 };
+
+// Completed (took 243483ms)
+// Batch 10 = Completed (took 36457ms)
+// Batch 20 = Completed (took 19417ms)
