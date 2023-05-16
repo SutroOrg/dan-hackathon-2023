@@ -11,10 +11,12 @@ const NUM_CPUS = cpus().length;
 
 const initClusterCohesionChunk = (
   pgClient: pg.Pool,
-  offset = 0,
+  offsets: { x: number; y: number },
   chunkSize = 5
 ) => {
-  console.log(`initClusterCohesionChunk(${offset}, ${chunkSize})`);
+  console.log(
+    `initClusterCohesionChunk({${offsets.x}, ${offsets.y}}, ${chunkSize})`
+  );
   return pgClient.query(`INSERT INTO cluster_cohesion SELECT
   x.rnum AS cluster1, y.rnum AS cluster2,
       (sum((e.vector <-> x.vector) + (e.vector <-> y.vector) - (y.vector <-> x.vector))) / count(e)
@@ -31,14 +33,14 @@ FROM
           vector
       FROM
           embeddings
-      LIMIT ${chunkSize} OFFSET ${offset}) AS x,
+      LIMIT ${chunkSize} OFFSET ${offsets.x}) AS x,
 (
       SELECT
           (row_number() OVER ()) - 1 AS rnum,
           vector
       FROM
           embeddings
-      LIMIT ${chunkSize} OFFSET ${offset}) AS y
+      LIMIT ${chunkSize} OFFSET ${offsets.y}) AS y
 GROUP BY
   x.rnum,
   y.rnum
@@ -187,12 +189,17 @@ export class HiAggAlgo {
 
     const overallStart = +Date.now();
 
-    const calculate = async (offset: number, chunkSize: number) => {
-      const totalChunks = this.clusters.length / chunkSize;
-      const chunkNumber = Math.floor(offset / chunkSize) + 1;
+    const calculate = async (
+      offsets: { x: number; y: number },
+      chunkSize: number
+    ) => {
+      const clusterCount = this.clusters.length;
+      const totalChunks = (clusterCount * clusterCount) / chunkSize;
+      const chunkNumber =
+        Math.floor((offsets.x * clusterCount + offsets.y) / chunkSize) + 1;
       console.log(`Calculating chunk #${chunkNumber} of cohesions`);
       const start = +Date.now();
-      await initClusterCohesionChunk(this.pgClient, offset, chunkSize);
+      await initClusterCohesionChunk(this.pgClient, offsets, chunkSize);
       const end = +Date.now();
       console.log(
         `${chunkNumber} finished. Took ${Math.ceil(
@@ -207,8 +214,23 @@ export class HiAggAlgo {
 
     const queue = new PQueue({ concurrency: NUM_CPUS });
     const CHUNK_SIZE = 50;
-    for (let chunk = 0; chunk * CHUNK_SIZE <= this.clusters.length; chunk++) {
-      queue.add(() => calculate(chunk * CHUNK_SIZE, CHUNK_SIZE));
+    for (
+      let chunkx = 0;
+      chunkx * CHUNK_SIZE <= this.clusters.length;
+      chunkx++
+    ) {
+      for (
+        let chunky = 0;
+        chunky * CHUNK_SIZE <= this.clusters.length;
+        chunky++
+      ) {
+        queue.add(() =>
+          calculate(
+            { x: chunkx * CHUNK_SIZE, y: CHUNK_SIZE * chunky },
+            CHUNK_SIZE
+          )
+        );
+      }
     }
 
     await queue.onEmpty();
