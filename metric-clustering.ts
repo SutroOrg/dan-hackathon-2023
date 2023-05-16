@@ -135,9 +135,7 @@ export class HiAggAlgo {
   }
 
   async getEmbeddings() {
-    const result = await this.pgClient.query(
-      "SELECT * FROM get_points() AS x(rnum INT,id CHAR(512));"
-    );
+    const result = await this.pgClient.query("SELECT * FROM points;");
     return result.rows;
   }
 

@@ -47,6 +47,15 @@ CREATE OR REPLACE FUNCTION rel_distance(x_id embeddings.id%TYPE, y_id embeddings
                 embeddings);
 $$;
 
+DROP MATERIALIZED VIEW IF EXISTS store;
+
+CREATE MATERIALIZED VIEW store AS
+SELECT
+    sum(dist(x.id, y.id)) /(count(x.id) * count(y.id)) AS base
+FROM
+    embeddings AS x
+    CROSS JOIN embeddings AS y;
+
 CREATE OR REPLACE FUNCTION rel_distance(y_id embeddings.id%TYPE)
     RETURNS real
     LANGUAGE SQL
@@ -86,15 +95,6 @@ CREATE OR REPLACE FUNCTION cohesion(s1 char(512)[], s2 char(512)[])
         SELECT
             unnest(s2) AS y) AS set2;
 $$;
-
-DROP MATERIALIZED VIEW IF EXISTS store;
-
-CREATE MATERIALIZED VIEW store AS
-SELECT
-    sum(dist(x.id, y.id)) /(count(x.id) * count(y.id)) AS base
-FROM
-    embeddings AS x
-    CROSS JOIN embeddings AS y;
 
 DROP MATERIALIZED VIEW IF EXISTS points;
 
