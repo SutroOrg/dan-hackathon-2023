@@ -9,6 +9,8 @@ import pg from "pg";
 
 const NUM_CPUS = cpus().length;
 
+const INIT_CLUSTER_COHESION_QUERY = `INSERT INTO cluster_cohesion (cluster1, cluster2, cohesion) VALUES($1,$2,cohesion(ARRAY[$3], ARRAY[$4]));`;
+
 export class HiAggAlgo {
   private metricSpace: MetricSpace<string>;
   private clusters: (string[] | null)[] = [];
@@ -83,16 +85,14 @@ export class HiAggAlgo {
     return [cluster1, cluster2];
   }
 
-  async initClusterCohesion(clusterId: number, cluster: string[]) {
-    if (cluster.length !== 1) {
-      throw new Error("Cannot init cluster cohesion for non-singleton");
-    }
-    console.log(
-      `Cluster Id: ${clusterId}; cluster contents: ${cluster[0].trim()}`
-    );
-    await this.pgClient.query("SELECT init_cluster_cohesion($1,$2);", [
-      clusterId,
-      cluster[0],
+  async initClusterCohesion(cluster1Id: number, cluster2Id: number) {
+    const cluster1 = this.clusters[cluster1Id];
+    const cluster2 = this.clusters[cluster2Id];
+    await this.pgClient.query(INIT_CLUSTER_COHESION_QUERY, [
+      cluster1Id,
+      cluster2Id,
+      cluster1[0],
+      cluster2[0],
     ]);
   }
 
@@ -160,23 +160,22 @@ export class HiAggAlgo {
     console.log("Building cluster cohesions");
 
     const overallStart = +Date.now();
-    const totalCohesions = this.clusters.length;
+    const totalCohesions = this.clusters.length * this.clusters.length;
     let totalCompleted = 0;
 
     console.log({ totalCohesions });
 
-    const calculate = async (clusterId: number) => {
+    const calculate = async (cluster1Id: number, cluster2Id: number) => {
+      const calcNumber = cluster1Id * this.clusters.length + cluster2Id + 1;
       console.log(
-        `Calculating cohesions for ${clusterId} (${
-          clusterId + 1
-        } of ${totalCohesions})`
+        `Calculating cohesions for ${cluster1Id} and ${cluster2Id} (${calcNumber} of ${totalCohesions})`
       );
       const start = +Date.now();
-      await this.initClusterCohesion(clusterId, this.clusters[clusterId]);
+      await this.initClusterCohesion(cluster1Id, cluster2Id);
       totalCompleted++;
       const end = +Date.now();
       console.log(
-        `${clusterId + 1} finished. Took ${Math.ceil(
+        `${calcNumber} finished. Took ${Math.ceil(
           (end - start) / 1000
         )}s. Running time: ${
           (end - overallStart) / 1000
@@ -187,8 +186,14 @@ export class HiAggAlgo {
     };
 
     const queue = new PQueue({ concurrency: NUM_CPUS });
-    for (let clusterId = 0; clusterId < this.clusters.length; clusterId++) {
-      queue.add(() => calculate(clusterId));
+    for (let cluster1Id = 0; cluster1Id < this.clusters.length; cluster1Id++) {
+      for (
+        let cluster2Id = 0;
+        cluster2Id < this.clusters.length;
+        cluster2Id++
+      ) {
+        queue.add(() => calculate(cluster1Id, cluster2Id));
+      }
     }
     await queue.onEmpty();
     console.log("Done");
