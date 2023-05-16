@@ -7,14 +7,19 @@ import { MetricSpace } from "./metric-space.js";
 import { cpus } from "os";
 import pg from "pg";
 
+const NUM_CPUS = cpus().length;
+
 export class HiAggAlgo {
   private metricSpace: MetricSpace<string>;
   private clusters: (string[] | null)[] = [];
-  private pgClient: pg.Client;
+  private pgClient: pg.Pool;
 
   constructor(metricSpace: MetricSpace<string>) {
     this.metricSpace = metricSpace;
-    this.pgClient = new pg.Client({ ssl: { rejectUnauthorized: false } });
+    this.pgClient = new pg.Pool({
+      max: NUM_CPUS * 2,
+      ssl: { rejectUnauthorized: false },
+    });
     this.pgClient.connect();
   }
 
@@ -181,7 +186,7 @@ export class HiAggAlgo {
       );
     };
 
-    const queue = new PQueue({ concurrency: cpus().length });
+    const queue = new PQueue({ concurrency: NUM_CPUS });
     for (let clusterId = 0; clusterId < this.clusters.length; clusterId++) {
       queue.add(() => calculate(clusterId));
     }
