@@ -96,18 +96,3 @@ CREATE OR REPLACE FUNCTION cohesion(s1 char(512)[], s2 char(512)[])
             unnest(s2) AS y) AS set2;
 $$;
 
-DROP MATERIALIZED VIEW IF EXISTS points;
-
-CREATE MATERIALIZED VIEW points AS
-SELECT
-    (row_number() OVER ()) - 1 AS rnum,
-    id
-FROM
-    embeddings
-ORDER BY
-    rnum;
-
-CREATE UNIQUE INDEX IF NOT EXISTS points_row ON points(rnum);
-
-CREATE UNIQUE INDEX IF NOT EXISTS points_id ON points(id);
-

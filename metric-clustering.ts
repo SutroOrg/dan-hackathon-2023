@@ -13,8 +13,9 @@ const initClusterCohesionChunk = (
   pgClient: pg.Pool,
   offset = 0,
   chunkSize = 5
-) =>
-  pgClient.query(`INSERT INTO cluster_cohesion SELECT
+) => {
+  console.log(`initClusterCohesionChunk(${offset}, ${chunkSize})`);
+  return pgClient.query(`INSERT INTO cluster_cohesion SELECT
   x.rnum AS cluster1, y.rnum AS cluster2,
       (sum((e.vector <-> x.vector) + (e.vector <-> y.vector) - (y.vector <-> x.vector))) / count(e)
       - (
@@ -46,6 +47,7 @@ ORDER BY
   y.rnum;
 
 `);
+};
 export class HiAggAlgo {
   private metricSpace: MetricSpace<string>;
   private clusters: (string[] | null)[] = [];
