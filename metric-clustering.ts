@@ -197,7 +197,7 @@ export class HiAggAlgo {
       const totalChunks = (clusterCount * clusterCount) / chunkSize;
       const chunkNumber =
         Math.floor((offsets.x * clusterCount + offsets.y) / chunkSize) + 1;
-      console.log(`Calculating chunk #${chunkNumber} of cohesions`);
+      console.log(`Calculating chunk #${chunkNumber} of ${totalChunks}`);
       const start = +Date.now();
       await initClusterCohesionChunk(this.pgClient, offsets, chunkSize);
       const end = +Date.now();
