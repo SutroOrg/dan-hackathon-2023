@@ -111,16 +111,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS points_row ON points(rnum);
 
 CREATE UNIQUE INDEX IF NOT EXISTS points_id ON points(id);
 
-CREATE OR REPLACE FUNCTION init_cluster_cohesion(pointRNum int, point_id char(512))
-    RETURNS void
-    LANGUAGE SQL
-    AS $$
-    INSERT INTO cluster_cohesion
-    SELECT
-        points.rnum AS cluster1,
-        pointRNum AS cluster2,
-        cohesion(ARRAY[points.id], ARRAY[point_id]) AS cohesion
-    FROM
-        points;
-$$;
-

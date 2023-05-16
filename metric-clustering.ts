@@ -9,8 +9,43 @@ import pg from "pg";
 
 const NUM_CPUS = cpus().length;
 
-const INIT_CLUSTER_COHESION_QUERY = `INSERT INTO cluster_cohesion (cluster1, cluster2, cohesion) VALUES($1,$2,cohesion(ARRAY[$3], ARRAY[$4]));`;
+const initClusterCohesionChunk = (
+  pgClient: pg.Pool,
+  offset = 0,
+  chunkSize = 5
+) =>
+  pgClient.query(`INSERT INTO cluster_cohesion SELECT
+  x.rnum AS cluster1, y.rnum AS cluster2,
+      (sum((e.vector <-> x.vector) + (e.vector <-> y.vector) - (y.vector <-> x.vector))) / count(e)
+      - (
+          SELECT
+              base
+          FROM
+              store) AS cohesion
+FROM
+  embeddings AS e,
+(
+      SELECT
+          (row_number() OVER ()) - 1 AS rnum,
+          vector
+      FROM
+          embeddings
+      LIMIT ${chunkSize} OFFSET ${offset}) AS x,
+(
+      SELECT
+          (row_number() OVER ()) - 1 AS rnum,
+          vector
+      FROM
+          embeddings
+      LIMIT ${chunkSize} OFFSET ${offset}) AS y
+GROUP BY
+  x.rnum,
+  y.rnum
+ORDER BY
+  x.rnum,
+  y.rnum;
 
+`);
 export class HiAggAlgo {
   private metricSpace: MetricSpace<string>;
   private clusters: (string[] | null)[] = [];
@@ -85,17 +120,6 @@ export class HiAggAlgo {
     return [cluster1, cluster2];
   }
 
-  async initClusterCohesion(cluster1Id: number, cluster2Id: number) {
-    const cluster1 = this.clusters[cluster1Id];
-    const cluster2 = this.clusters[cluster2Id];
-    await this.pgClient.query(INIT_CLUSTER_COHESION_QUERY, [
-      cluster1Id,
-      cluster2Id,
-      cluster1[0],
-      cluster2[0],
-    ]);
-  }
-
   async setClusterCohesion(
     cluster1: string[],
     cluster2: string[],
@@ -160,41 +184,31 @@ export class HiAggAlgo {
     console.log("Building cluster cohesions");
 
     const overallStart = +Date.now();
-    const totalCohesions = this.clusters.length * this.clusters.length;
-    let totalCompleted = 0;
 
-    console.log({ totalCohesions });
-
-    const calculate = async (cluster1Id: number, cluster2Id: number) => {
-      const calcNumber = cluster1Id * this.clusters.length + cluster2Id + 1;
-      console.log(
-        `Calculating cohesions for ${cluster1Id} and ${cluster2Id} (${calcNumber} of ${totalCohesions})`
-      );
+    const calculate = async (offset: number, chunkSize: number) => {
+      const totalChunks = this.clusters.length / chunkSize;
+      const chunkNumber = Math.floor(offset / chunkSize) + 1;
+      console.log(`Calculating chunk #${chunkNumber} of cohesions`);
       const start = +Date.now();
-      await this.initClusterCohesion(cluster1Id, cluster2Id);
-      totalCompleted++;
+      await initClusterCohesionChunk(this.pgClient, offset, chunkSize);
       const end = +Date.now();
       console.log(
-        `${calcNumber} finished. Took ${Math.ceil(
+        `${chunkNumber} finished. Took ${Math.ceil(
           (end - start) / 1000
         )}s. Running time: ${
           (end - overallStart) / 1000
         }s. Predicted total time: ~ ${Math.ceil(
-          ((end - overallStart) * totalCohesions) / (1000 * totalCompleted)
+          ((end - overallStart) * totalChunks) / (1000 * chunkNumber)
         )}s`
       );
     };
 
     const queue = new PQueue({ concurrency: NUM_CPUS });
-    for (let cluster1Id = 0; cluster1Id < this.clusters.length; cluster1Id++) {
-      for (
-        let cluster2Id = 0;
-        cluster2Id < this.clusters.length;
-        cluster2Id++
-      ) {
-        queue.add(() => calculate(cluster1Id, cluster2Id));
-      }
+    const CHUNK_SIZE = 50;
+    for (let chunk = 0; chunk * CHUNK_SIZE <= this.clusters.length; chunk++) {
+      queue.add(() => calculate(chunk * CHUNK_SIZE, CHUNK_SIZE));
     }
+
     await queue.onEmpty();
     console.log("Done");
 
